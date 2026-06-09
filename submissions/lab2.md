@@ -264,3 +264,176 @@ In this scenario:
 - However: If a system administrator has configured aggressive garbage collection (`--aggressive` or `--prune=now`), or if the reflog entries had expired (beyond 90 days), the objects would be permanently deleted and unrecoverable.
 
 The reflog is Git's safety net for recovery, but it is not permanent. Always create branches or tags for important work rather than relying on reflog for long-term recovery.
+
+---
+
+## Task 2 — Tag a Release & Rebase a Feature
+
+### 2.1: Annotated, signed release tag
+
+Created an annotated, signed tag for the release:
+
+```bash
+$ git switch main
+Switched to branch 'main'
+Your branch is up to date with 'origin/main'.
+
+$ git pull --ff-only upstream main
+From github.com:inno-devops-labs/DevOps-Intro
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+
+$ git tag -a -s "v0.1.0-lab2-Ghadeer" -m "Lab 2 milestone — version control deep dive"
+# (tag created successfully)
+
+$ git push origin "v0.1.0-lab2-Ghadeer"
+To github.com:G-Akleh/DevOps-Intro.git
+ * [new tag]         v0.1.0-lab2-Ghadeer -> v0.1.0-lab2-Ghadeer
+```
+
+#### Verify tag is annotated and signed
+
+```bash
+$ git tag -l --format='%(refname:short) %(objecttype) %(*objecttype)' | Select-String lab2
+v0.1.0-lab2-Ghadeer tag commit
+```
+
+**Interpretation:** The format shows:
+
+- Tag name: `v0.1.0-lab2-Ghadeer`
+- `objecttype: tag` → It's an annotated tag (not lightweight)
+- `*objecttype: commit` → The tag points to a commit
+
+#### Verify the signature
+
+```bash
+$ git tag -v "v0.1.0-lab2-Ghadeer"
+object 2667a3e516e7ecc574676a1a5f65d0c58077da2f
+type commit
+tag v0.1.0-lab2-Ghadeer
+tagger G-Akleh <ghadeer_akleh@hotmail.com> 1781037881 +0300
+
+Lab 2 milestone — version control deep dive
+Good "git" signature for ghadeer_akleh@hotmail.com with ED25519 key SHA256:F+2/0O65nDRR6Zz2lIJc7eEn+w7kEfeZWrTc5J1HGy8
+```
+
+**Success:** The tag is verified with a **"Good" signature** using the ED25519 SSH key.
+
+---
+
+### 2.2: Rebase + force-with-lease
+
+#### Before rebase: branch graph
+
+```bash
+$ git log --oneline --graph --all -10
+* 5622c8c (feature/lab2) docs(lab2): add task 1
+* 3cd6061 wip(lab2): more progress
+* 6e915db wip(lab2): start
+* e9bc708 (origin/feature/lab1, feature/lab1) docs(lab1): add community engagement
+* 7b7fe1d docs(lab1): fix screenshot path
+* 2bcc1d7 docs(lab1): finish submission
+* d79f289 docs(lab1): add badge screenshot
+* 0d4720a docs(lab1): add submission content
+* 001a94a docs(lab1): start submission
+| * 2667a3e (HEAD -> main, tag: v0.1.0-lab2-Ghadeer, origin/main, origin/HEAD) docs: add PR template
+|/
+```
+
+**Analysis:** feature/lab2 is 3 commits ahead of main and has diverged. The branches have a common ancestor but have separate histories.
+
+#### Simulate upstream moving while you worked
+
+```bash
+$ git switch main
+Switched to branch 'main'
+
+$ git commit -S -s --allow-empty -m "docs: upstream moved while you worked"
+[main 781ab23] docs: upstream moved while you worked
+
+$ git push origin main
+To github.com:G-Akleh/DevOps-Intro.git
+   2667a3e..781ab23  main -> main
+```
+
+Now upstream/main is ahead of the feature branch's base.
+
+#### Perform the rebase
+
+```bash
+$ git switch feature/lab2
+Switched to branch 'feature/lab2'
+
+$ git fetch origin
+# (fetched remote updates)
+
+$ git rebase origin/main
+Successfully rebased and updated refs/heads/feature/lab2.
+```
+
+**No conflicts** — rebase completed cleanly.
+
+#### After rebase: branch graph
+
+```bash
+$ git log --oneline --graph --all -10
+* 391b7d6 (HEAD -> feature/lab2) docs(lab2): add task 1
+* 08b2f41 wip(lab2): more progress
+* 4fc459f wip(lab2): start
+* 151c85b docs(lab1): add community engagement
+* 2429c8d docs(lab1): fix screenshot path
+* 9574fad docs(lab1): finish submission
+* 202bab1 docs(lab1): add badge screenshot
+* 1687725 docs(lab1): add submission content
+* ac2c2d2 docs(lab1): start submission
+* 781ab23 (origin/main, origin/HEAD, main) docs: upstream moved while you worked
+```
+
+**Analysis:** feature/lab2 is now **linearly on top** of origin/main:
+
+- The three lab2 commits have **new SHAs** (expected: rebase replays commits)
+- Old SHAs: `5622c8c`, `3cd6061`, `6e915db`
+- New SHAs: `391b7d6`, `08b2f41`, `4fc459f`
+- The common ancestor is now the "upstream moved" commit `781ab23`
+- No branching — clean linear history
+
+#### Push with force-with-lease
+
+```bash
+$ git push --force-with-lease origin feature/lab2
+To github.com:G-Akleh/DevOps-Intro.git
+ * [new branch]      feature/lab2 -> feature/lab2
+
+remote: Create a pull request for 'feature/lab2' on GitHub by visiting:
+remote:      https://github.com/G-Akleh/DevOps-Intro/pull/new/feature/lab2
+```
+
+**Successfully pushed** with `--force-with-lease` (lease protection prevented accidental overwrites of concurrent work).
+
+---
+
+### 2.3: Merge vs Rebase
+
+#### rebase is better for:
+
+- **Feature branch development:** Keeping a clean, linear history on a feature branch before merging makes code review clearer
+- **Avoiding merge commits:** If we want a "flat" history without "Merge branch" commits, we rebase first then merge with `--ff-only`
+- **Local branches:** On branches only we're working on, rebase is safe and clean
+- **CI/CD pipelines:** Linear history makes bisect and blame operations easier to interpret
+- **Before merging to main:** We rebase a feature branch onto main, then fast-forward merge to keep main's history linear
+
+#### merge is better for:
+
+- **Shared branches:** we should never rebase a branch that multiple people are working on; we merge instead (rewriting history breaks others' work)
+- **Preserving history:** Merge commits document _when_ and _how_ branches were integrated (useful for release management)
+- **Distributed teams:** Merge is safer for collaborative branches; it explicitly documents integration points
+- **Merging into main:** Some teams use `git merge --no-ff` to main to preserve evidence of each feature
+
+#### In this lab:
+
+**Rebase was the right choice** because:
+
+1. `feature/lab2` was a solo, local branch with no other collaborators
+2. The rebase was before a PR (integration), not after collaboration
+3. The result is a clean, linear history that will be easy to review in the PR
+4. Once pushed as a PR, rebasing again would be problematic; at that point, further changes would use merge if main moved again
