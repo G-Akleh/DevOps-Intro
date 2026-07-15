@@ -1,0 +1,4 @@
+.spin/
+spin-up.log
+spin-up-err.log
+spin-cold.log
